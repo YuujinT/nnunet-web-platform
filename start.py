@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-nnUNet 医学影像 Web 推理系统 一键启动
+“慧眼”医学图像Web识别平台 一键启动
 """
 
 import os
