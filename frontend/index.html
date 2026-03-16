@@ -1,0 +1,1025 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>基于 nnUNet 的医学影像 Web 推理系统</title>
+    <script src="https://unpkg.com/@niivue/niivue@0.43.1/dist/niivue.umd.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #0a0a0f;
+            color: #e0e0e0;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .header {
+            height: 70px;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 30px;
+            border-bottom: 1px solid rgba(79, 70, 229, 0.3);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .header-left h1 {
+            font-size: 20px;
+            font-weight: 600;
+            background: linear-gradient(135deg, #fff 0%, #a5b4fc 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .subtitle {
+            font-size: 13px;
+            color: #94a3b8;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 4px 12px;
+            border-radius: 20px;
+            border: 1px solid rgba(79, 70, 229, 0.3);
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        /* 图例 */
+        .legend {
+            display: flex;
+            gap: 20px;
+            padding: 8px 16px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 30px;
+            backdrop-filter: blur(5px);
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+        }
+
+        .legend-item.pred .legend-color {
+            background: linear-gradient(135deg, #ff4d4d, #ff8080);
+            box-shadow: 0 0 10px rgba(255, 77, 77, 0.5);
+        }
+
+        .legend-item.gt .legend-color {
+            background: linear-gradient(135deg, #4caf50, #80e080);
+            box-shadow: 0 0 10px rgba(76, 175, 80, 0.5);
+        }
+
+        .legend-color {
+            width: 16px;
+            height: 16px;
+            border-radius: 4px;
+        }
+
+        /* 下拉选择框 */
+        #caseSelect {
+            padding: 10px 20px;
+            background: rgba(15, 15, 25, 0.8);
+            border: 1px solid #3a3a6a;
+            color: #fff;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            min-width: 200px;
+        }
+
+        #caseSelect:hover {
+            border-color: #4f46e5;
+        }
+
+        /* 按钮 */
+        .btn-primary {
+            background: linear-gradient(135deg, #4f46e5, #7c3aed);
+            color: white;
+            border: none;
+            padding: 10px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            box-shadow: 0 4px 15px rgba(79, 70, 229, 0.3);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(79, 70, 229, 0.5);
+        }
+
+        /* 主布局 */
+        .main-container {
+            display: flex;
+            height: calc(100vh - 70px);
+            position: relative;
+        }
+
+        /* 侧边栏 */
+        .sidebar {
+            width: 350px;
+            background: rgba(10, 10, 20, 0.95);
+            backdrop-filter: blur(10px);
+            border-right: 1px solid rgba(79, 70, 229, 0.2);
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .panel {
+            background: rgba(20, 20, 35, 0.7);
+            border: 1px solid rgba(79, 70, 229, 0.2);
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .panel h3 {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            color: #a5b4fc;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* 病例信息 */
+        .case-info {
+            font-size: 14px;
+        }
+
+        .case-info-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .case-info-item:last-child {
+            border-bottom: none;
+        }
+
+        .case-info-item .label {
+            color: #94a3b8;
+        }
+
+        .case-info-item .value {
+            font-weight: 500;
+            color: #fff;
+        }
+
+        .empty-text {
+            color: #666;
+            text-align: center;
+            padding: 30px 0;
+            font-style: italic;
+        }
+
+        /* 推理控制 */
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 13px;
+            color: #94a3b8;
+            margin-bottom: 6px;
+        }
+
+        .form-group select {
+            width: 100%;
+            padding: 10px 12px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid #3a3a6a;
+            color: #fff;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .btn-inference {
+            width: 100%;
+            background: linear-gradient(135deg, #10b981, #059669);
+            color: white;
+            border: none;
+            padding: 14px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .btn-inference:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(16, 185, 129, 0.5);
+        }
+
+        /* 显示模式按钮 */
+        .mode-buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .mode-btn {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid #3a3a6a;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.2s;
+            width: 100%;
+            text-align: left;
+        }
+
+        .mode-btn:hover {
+            border-color: #4f46e5;
+            background: rgba(79, 70, 229, 0.1);
+        }
+
+        .mode-btn.active {
+            border-color: #4f46e5;
+            background: linear-gradient(135deg, rgba(79, 70, 229, 0.2), rgba(124, 58, 237, 0.2));
+        }
+
+        .btn-icon {
+            font-size: 24px;
+        }
+
+        .btn-content {
+            flex: 1;
+        }
+
+        .btn-title {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 2px;
+            color: #fff;
+        }
+
+        .btn-desc {
+            font-size: 12px;
+            color: #94a3b8;
+        }
+
+        /* 透明度控制 */
+        .opacity-control {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 10px;
+            padding: 15px;
+        }
+
+        .opacity-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            font-size: 13px;
+            color: #94a3b8;
+        }
+
+        .opacity-labels {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 5px;
+            font-size: 11px;
+            color: #666;
+        }
+
+        input[type="range"] {
+            width: 100%;
+            height: 6px;
+            -webkit-appearance: none;
+            background: linear-gradient(90deg, #4f46e5, #7c3aed);
+            border-radius: 3px;
+            outline: none;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 18px;
+            height: 18px;
+            background: white;
+            border-radius: 50%;
+            cursor: pointer;
+            border: 2px solid #4f46e5;
+        }
+
+        /* 统计信息 */
+        .stats {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 10px;
+            padding: 12px;
+        }
+
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .stat-row:last-child {
+            border-bottom: none;
+        }
+
+        /* 可视化区域 */
+        .viewer-container {
+            flex: 1;
+            position: relative;
+            background: #000;
+        }
+
+        #gl-container {
+            width: 100%;
+            height: 100%;
+            position: relative;
+        }
+
+        canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        /* 空状态 */
+        .empty-state {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            z-index: 10;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 40px;
+            border-radius: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(79, 70, 229, 0.3);
+        }
+
+        .empty-icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+            opacity: 0.7;
+        }
+
+        .empty-state h3 {
+            font-size: 24px;
+            margin-bottom: 10px;
+            color: #fff;
+        }
+
+        .empty-state p {
+            color: #94a3b8;
+            margin-bottom: 20px;
+        }
+
+        /* 加载遮罩 */
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(5px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .loading-content {
+            text-align: center;
+            background: rgba(20, 20, 35, 0.9);
+            padding: 40px;
+            border-radius: 20px;
+            border: 1px solid #4f46e5;
+            min-width: 300px;
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 3px solid rgba(79, 70, 229, 0.3);
+            border-top-color: #4f46e5;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .loading-text {
+            font-size: 16px;
+            margin-bottom: 10px;
+            color: #fff;
+        }
+
+        .loading-progress {
+            width: 100%;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+            margin: 15px 0;
+            overflow: hidden;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #4f46e5, #7c3aed);
+            width: 0%;
+            transition: width 0.3s;
+        }
+
+        .loading-detail {
+            font-size: 13px;
+            color: #94a3b8;
+            margin-bottom: 15px;
+        }
+
+        .btn-cancel {
+            background: transparent;
+            border: 1px solid #666;
+            color: #fff;
+            padding: 8px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-cancel:hover {
+            border-color: #f44336;
+            color: #f44336;
+        }
+
+        /* 模态框 */
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(5px);
+        }
+
+        .modal-content {
+            position: relative;
+            background: linear-gradient(135deg, #1a1a2e, #16213e);
+            border-radius: 20px;
+            border: 1px solid #4f46e5;
+            width: 500px;
+            max-width: 90%;
+            z-index: 2001;
+        }
+
+        .modal-small {
+            width: 400px;
+        }
+
+        .modal-header {
+            padding: 20px;
+            border-bottom: 1px solid rgba(79, 70, 229, 0.3);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-header h3 {
+            font-size: 18px;
+            color: #fff;
+        }
+
+        .btn-close {
+            background: transparent;
+            border: none;
+            color: #94a3b8;
+            font-size: 24px;
+            cursor: pointer;
+        }
+
+        .btn-close:hover {
+            color: #f44336;
+        }
+
+        .modal-body {
+            padding: 20px;
+        }
+
+        .modal-footer {
+            padding: 20px;
+            border-top: 1px solid rgba(79, 70, 229, 0.3);
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+
+        /* 上传区域 */
+        .upload-area {
+            border: 2px dashed #3a3a6a;
+            border-radius: 12px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        .upload-area:hover, .upload-area.dragover {
+            border-color: #4f46e5;
+            background: rgba(79, 70, 229, 0.1);
+        }
+
+        .upload-icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+            opacity: 0.7;
+        }
+
+        .upload-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+
+        .upload-desc {
+            font-size: 14px;
+            color: #94a3b8;
+            margin-bottom: 10px;
+        }
+
+        .upload-hint {
+            font-size: 12px;
+            color: #666;
+        }
+
+        /* 上传选项 */
+        .upload-options {
+            margin: 20px 0;
+            padding: 15px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+        }
+
+        .checkbox {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+        }
+
+        .checkbox input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+            accent-color: #4f46e5;
+        }
+
+        .file-list {
+            max-height: 200px;
+            overflow-y: auto;
+            margin: 15px 0;
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+        }
+
+        .file-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            font-size: 13px;
+        }
+
+        .file-item:last-child {
+            border-bottom: none;
+        }
+
+        .file-name {
+            color: #fff;
+            max-width: 200px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .file-size {
+            color: #94a3b8;
+        }
+
+        /* 任务状态 */
+        .task-status {
+            text-align: center;
+            padding: 20px;
+        }
+
+        .task-icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .task-message {
+            font-size: 16px;
+            margin-bottom: 10px;
+            color: #fff;
+        }
+
+        .task-progress {
+            width: 100%;
+            height: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            margin: 15px 0;
+            overflow: hidden;
+        }
+
+        .task-detail {
+            font-size: 13px;
+            color: #94a3b8;
+        }
+
+        /* 日志面板 */
+        .debug-panel {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 400px;
+            background: rgba(0, 0, 0, 0.9);
+            border: 1px solid #4f46e5;
+            border-radius: 10px;
+            z-index: 3000;
+            backdrop-filter: blur(10px);
+        }
+
+        .debug-panel.collapsed {
+            width: 120px;
+        }
+
+        .debug-panel.collapsed .debug-header span:first-child {
+            display: none;
+        }
+
+        .debug-panel.collapsed #debugContent {
+            display: none;
+        }
+
+        .debug-header {
+            padding: 10px 15px;
+            background: rgba(79, 70, 229, 0.2);
+            border-bottom: 1px solid #4f46e5;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+        }
+
+        .debug-header span {
+            font-weight: 600;
+            color: #a5b4fc;
+        }
+
+        .debug-header button {
+            background: transparent;
+            border: 1px solid #4f46e5;
+            color: #fff;
+            padding: 4px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 11px;
+            margin-left: 5px;
+        }
+
+        .debug-header button:hover {
+            background: #4f46e5;
+        }
+
+        #debugContent {
+            padding: 15px;
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 11px;
+            line-height: 1.5;
+        }
+
+        .log-item {
+            margin-bottom: 4px;
+            word-break: break-word;
+        }
+
+        .log-item.error-message {
+            color: #ff6b6b;
+        }
+
+        .log-item.success-message {
+            color: #51cf66;
+        }
+
+        .log-item.warning-message {
+            color: #ffd43b;
+        }
+
+        .btn-secondary {
+            background: transparent;
+            border: 1px solid #666;
+            color: #fff;
+            padding: 10px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-secondary:hover {
+            border-color: #4f46e5;
+            color: #4f46e5;
+        }
+    </style>
+</head>
+<body>
+    <!-- 头部 -->
+    <header class="header">
+        <div class="header-left">
+            <h1>🧠 基于 nnUNet 的医学影像 Web 推理系统</h1>
+            <span class="subtitle">上传 → 推理 → 对比 → 可视化</span>
+        </div>
+        <div class="header-right">
+            <div class="legend" id="legend">
+                <div class="legend-item pred">
+                    <div class="legend-color"></div>
+                    <span>预测 (Prediction)</span>
+                </div>
+                <div class="legend-item gt">
+                    <div class="legend-color"></div>
+                    <span>金标准 (Ground Truth)</span>
+                </div>
+            </div>
+            <select id="caseSelect">
+                <option value="">选择病例...</option>
+            </select>
+            <button class="btn-primary" onclick="showUploadModal()">+ 上传新病例</button>
+        </div>
+    </header>
+
+    <!-- 主内容区 -->
+    <div class="main-container">
+        <!-- 侧边栏 -->
+        <aside class="sidebar">
+            <!-- 病例信息 -->
+            <div class="panel">
+                <h3>📋 病例信息</h3>
+                <div id="caseInfo" class="case-info">
+                    <p class="empty-text">请选择或上传病例</p>
+                </div>
+            </div>
+
+            <!-- 推理控制 -->
+            <div class="panel" id="inferencePanel" style="display: none;">
+                <h3>🚀 推理控制</h3>
+                <div class="form-group">
+                    <label>选择模型</label>
+                    <select id="modelSelect">
+                        <option value="">加载中...</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>模型属性</label>
+                    <select id="modelConfigSelect">
+                        <option value="3d_fullres">3d_fullres</option>
+                        <option value="3d_lowres">3d_lowres</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Fold 选择</label>
+                    <select id="foldSelect">
+                        <option value="">All Folds（默认）</option>
+                        <option value="0">Fold 0</option>
+                        <option value="1">Fold 1</option>
+                        <option value="2">Fold 2</option>
+                        <option value="3">Fold 3</option>
+                        <option value="4">Fold 4</option>
+                    </select>
+                </div>
+                <button class="btn-inference" onclick="startInference()">
+                    <span class="btn-icon">▶️</span>
+                    开始推理
+                </button>
+            </div>
+
+            <!-- 显示模式 -->
+            <div class="panel">
+                <h3>👁️ 显示模式</h3>
+                <div class="mode-buttons">
+                    <button class="mode-btn" data-mode="pred" onclick="setMode('pred')">
+                        <span class="btn-icon">🔴</span>
+                        <div class="btn-content">
+                            <span class="btn-title">仅预测</span>
+                            <span class="btn-desc">只显示模型输出</span>
+                        </div>
+                    </button>
+                    <button class="mode-btn active" data-mode="both" onclick="setMode('both')">
+                        <span class="btn-icon">🔀</span>
+                        <div class="btn-content">
+                            <span class="btn-title">对比模式</span>
+                            <span class="btn-desc">预测 vs 金标准</span>
+                        </div>
+                    </button>
+                    <button class="mode-btn" data-mode="gt" onclick="setMode('gt')">
+                        <span class="btn-icon">🟢</span>
+                        <div class="btn-content">
+                            <span class="btn-title">仅金标准</span>
+                            <span class="btn-desc">只显示专家标注</span>
+                        </div>
+                    </button>
+                </div>
+            </div>
+
+            <!-- 透明度 -->
+            <div class="panel">
+                <h3>🎨 透明度调节</h3>
+                <div class="opacity-control">
+                    <div class="opacity-header">
+                        <span>分割遮罩</span>
+                        <span id="opacityValue">60%</span>
+                    </div>
+                    <input type="range" id="opacity" min="0" max="100" value="60">
+                    <div class="opacity-labels">
+                        <span>透明</span>
+                        <span>不透明</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 统计信息 -->
+            <div class="panel">
+                <h3>📊 加载信息</h3>
+                <div class="stats">
+                    <div class="stat-row">
+                        <span>加载时间</span>
+                        <span id="loadTime">-</span>
+                    </div>
+                    <div class="stat-row">
+                        <span>数据大小</span>
+                        <span id="dataSize">-</span>
+                    </div>
+                    <div class="stat-row">
+                        <span>当前模式</span>
+                        <span id="currentMode">对比模式</span>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- 可视化区域 -->
+        <main class="viewer-container">
+            <div id="gl-container">
+                <canvas id="gl"></canvas>
+
+                <!-- 空状态提示 -->
+                <div class="empty-state" id="emptyState">
+                    <div class="empty-icon">🖼️</div>
+                    <h3>暂无数据</h3>
+                    <p>请上传新病例或选择已有病例查看</p>
+                    <button class="btn-primary" onclick="showUploadModal()">上传病例</button>
+                </div>
+
+                <!-- 加载遮罩 -->
+                <div class="loading-overlay" id="loadingOverlay" style="display: none;">
+                    <div class="loading-content">
+                        <div class="spinner"></div>
+                        <div class="loading-text" id="loadingText">加载中...</div>
+                        <div class="loading-progress">
+                            <div class="progress-bar" id="progressBar"></div>
+                        </div>
+                        <div class="loading-detail" id="loadingDetail">准备中</div>
+                        <button class="btn-cancel" onclick="cancelOperation()" id="cancelBtn">取消</button>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- 上传模态框 -->
+    <div class="modal" id="uploadModal">
+        <div class="modal-overlay" onclick="hideUploadModal()"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>📤 上传新病例</h3>
+                <button class="btn-close" onclick="hideUploadModal()">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="upload-area" id="dropZone">
+                    <div class="upload-icon">📁</div>
+                    <p class="upload-title">拖拽文件到此处</p>
+                    <p class="upload-desc">或点击选择文件</p>
+                    <p class="upload-hint">支持 .nii.gz, .nii, .dcm, .zip</p>
+                    <input type="file" id="fileInput" multiple accept=".nii.gz,.nii,.dcm,.zip" style="display: none;">
+                </div>
+
+                <div class="upload-options">
+                    <label class="checkbox">
+                        <input type="checkbox" id="hasGroundTruth">
+                        <span>同时上传金标准 (segmentation.nii.gz)</span>
+                    </label>
+                </div>
+
+                <div class="file-list" id="fileList"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="hideUploadModal()">取消</button>
+                <button class="btn-primary" onclick="confirmUpload()" id="uploadBtn" disabled>开始上传</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 任务进度模态框 -->
+    <div class="modal" id="taskModal">
+        <div class="modal-overlay"></div>
+        <div class="modal-content modal-small">
+            <div class="modal-header">
+                <h3>🚀 推理任务</h3>
+            </div>
+            <div class="modal-body">
+                <div class="task-status">
+                    <div class="task-icon" id="taskIcon">⏳</div>
+                    <div class="task-message" id="taskMessage">任务排队中...</div>
+                    <div class="task-progress">
+                        <div class="progress-bar" id="taskProgressBar"></div>
+                    </div>
+                    <div class="task-detail" id="taskDetail">等待开始</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 日志面板 -->
+    <div class="debug-panel" id="debugPanel">
+        <div class="debug-header" onclick="toggleDebug()">
+            <span>📝 系统日志</span>
+            <div onclick="event.stopPropagation()">
+                <button onclick="toggleDebug()" id="toggleDebugBtn">收起</button>
+                <button onclick="clearDebug()">清空</button>
+            </div>
+        </div>
+        <div id="debugContent"></div>
+    </div>
+
+    <!-- 引入 JS -->
+    <script src="js/app.js?v=20260303_1"></script>
+</body>
+</html>
+
